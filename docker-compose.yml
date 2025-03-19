@@ -1,0 +1,45 @@
+# Builds a single image from our source code, and creates two containers, one for deployment, the other for running unit tests.
+
+# To build and run:
+#     docker compose build
+# To run for testing:
+#     docker compose up
+# To run in the background (detached):
+#     docker compose up -d
+# To Troubleshoot:
+#     docker compose run --entrypoint /bin/bash --rm dief_competition_2
+
+secrets:
+  build_secret:
+    file: ./.env.secret
+
+services:
+
+  main:
+    image: dief_competition_2 # make sure this matches the docker-image.yml IMAGE_NAME variable
+    environment:
+      TZ: "Australia/Sydney" # Set the container's timezone, otherwise it defaults to UTC
+    env_file:
+      - .env
+    build:
+      context: .
+      secrets:
+        - build_secret
+      args: # pass env vars to docker build
+        PROJECT_NAME: dief_competition_2
+    restart: 'no'
+    entrypoint: bash
+    volumes:
+      - ./data:/usr/src/app/dief_competition_2/data
+      - ./output:/usr/src/app/dief_competition_2/output
+      - ./src/config:/usr/src/app/dief_competition_2/config
+
+  test:
+    image: dief_competition_2
+    entrypoint: uv run --no-sync poe test
+    restart: 'no'
+    # Mount local data and output dirs into container
+    volumes:
+      - ./data:/usr/src/app/dief_competition_2/data
+      - ./output:/usr/src/app/dief_competition_2/output
+      - ./src/config:/usr/src/app/dief_competition_2/config
