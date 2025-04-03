@@ -66,30 +66,30 @@ class PredictionPipeline:
             self.logger,
         )
 
-        regressor = BaselineRegressor()
-        baseline_model_file = self.output_dir / "baseline_model.pkl"
-        baseline_model = regressor.get_or_create_baseline_model(
-            training_data,
-            baseline_model_file,
-        )
-        baseline_model = regressor.train(training_data, baseline_model)
-        baseline_predictions = regressor.test(baseline_model, test_data)
-        regressor.visualise_regressions(
-            baseline_predictions,
-            self.output_dir,
-            self.dataset_id,
-            self.logger,
-        )
+        # regressor = BaselineRegressor()
+        # baseline_model_file = self.output_dir / "baseline_model.pkl"
+        # baseline_model = regressor.get_or_create_baseline_model(
+        #     training_data,
+        #     baseline_model_file,
+        # )
+        # baseline_model = regressor.train(training_data, baseline_model)
+        # baseline_predictions = regressor.test(baseline_model, test_data)
+        # regressor.visualise_regressions(
+        #     baseline_predictions,
+        #     self.output_dir,
+        #     self.dataset_id,
+        #     self.logger,
+        # )
 
-    def get_baseline_model(
-        self, regressor: "BaselineRegressor", data: pl.DataFrame
-    ) -> tpot.TPOTRegressor:
-        baseline_model_file = self.output_dir / "baseline_model.pkl"
-        if baseline_model_file.exists():
-            with open(baseline_model_file, "rb") as fp:
-                return pickle.load(fp)
-        else:
-            regressor.train(data)
+    # def get_baseline_model(
+    #     self, regressor: "BaselineRegressor", data: pl.DataFrame
+    # ) -> tpot.TPOTRegressor:
+    #     baseline_model_file = self.output_dir / "baseline_model.pkl"
+    #     if baseline_model_file.exists():
+    #         with open(baseline_model_file, "rb") as fp:
+    #             return pickle.load(fp)
+    #     else:
+    #         regressor.train(data)
 
     @staticmethod
     def add_lagged_columns(

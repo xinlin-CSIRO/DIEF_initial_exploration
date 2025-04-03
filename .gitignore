@@ -188,3 +188,6 @@ output/
 .pytest_cache
 .git
 .env*
+*.csv
+*.png
+*.html

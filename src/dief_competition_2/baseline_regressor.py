@@ -11,6 +11,13 @@ import sklearn.pipeline
 import tpot
 from dask.distributed import LocalCluster
 from sklearn.pipeline import Pipeline
+import numpy as np
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+from collections import Counter
 
 
 class BaselineRegressor:
@@ -50,15 +57,27 @@ class BaselineRegressor:
 
     def hyperparameter_train(self, data: pl.DataFrame) -> tpot.TPOTRegressor:
         x, y = self.split_data(data)
+
+        # Convert to pandas for sklearn compatibility
+        x = x.drop(self.omit_columns).to_pandas()
+        y = y.to_pandas()
+
+        # 🔥 Drop datetime columns from X
+        datetime_cols = x.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]).columns
+        x = x.drop(columns=datetime_cols)
+
+        # Handle NaNs
+        x = x.dropna()
+        y = y.loc[x.index]  # align y with cleaned x
+
         cluster = LocalCluster(n_workers=12)
         with cluster.get_client() as client:
             model = tpot.TPOTRegressor(
                 random_state=42,
-                verbose=3,
-                client=client,
             )
-            model.fit(x.drop(self.omit_columns), y.to_numpy())
+            model.fit(x, y.to_numpy())
             client.close()
+
         return model
 
     def train(
