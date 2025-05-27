@@ -1,7 +1,8 @@
 # The Software is copyright (c) Commonwealth Scientific and Industrial Research Organisation (CSIRO) 2023-2025.
 import pathlib
 import pickle
-
+from tpot import TPOTRegressor
+from dask.distributed import LocalCluster
 import loguru
 import numpy as np
 import plotly.express as px
@@ -44,16 +45,27 @@ class BaselineRegressor:
         return x, y
 
     def get_or_create_baseline_model(
-        self, data: pl.DataFrame, baseline_model_file: pathlib.Path
+            self, data: pl.DataFrame, baseline_model_file: pathlib.Path
     ) -> sklearn.pipeline.Pipeline:
+        # 🔥 Force delete cached model so it retrains
         if baseline_model_file.exists():
-            with open(baseline_model_file, "rb") as f:
-                return pickle.load(f)
-        else:
-            model = self.hyperparameter_train(data)
-            with open(baseline_model_file, "wb") as f:
-                pickle.dump(model.fitted_pipeline_, f)
-            return model.fitted_pipeline_
+            print(f"🗑️ Removing cached model to force retraining: {baseline_model_file}")
+            baseline_model_file.unlink()
+
+        print("🚀 Training new TPOT model...")
+        model = self.hyperparameter_train(data)
+
+        # Save the new model
+        with open(baseline_model_file, "wb") as f:
+            pickle.dump(model.fitted_pipeline_, f)
+
+        # ✅ Print all pipelines TPOT tried
+        print("\n✅ TPOT evaluated the following pipelines:\n")
+        for i, (pipeline_str, score) in enumerate(model.evaluated_individuals_.items(), 1):
+            print(f"{i:03d}: Score={score:.4f}")
+            print(f"Pipeline: {pipeline_str}\n")
+
+        return model.fitted_pipeline_
 
     def hyperparameter_train(self, data: pl.DataFrame) -> tpot.TPOTRegressor:
         x, y = self.split_data(data)
@@ -70,15 +82,38 @@ class BaselineRegressor:
         x = x.dropna()
         y = y.loc[x.index]  # align y with cleaned x
 
+        model = TPOTRegressor(
+            generations=5,  # fewer generations
+            population_size=20,  # fewer candidates per generation
+            max_time_mins=10,  # hard time cap in minutes
+            verbosity=2,  # show progress
+            n_jobs=-1,  # use all available CPUs
+            random_state=42
+        )
         cluster = LocalCluster(n_workers=12)
         with cluster.get_client() as client:
-            model = tpot.TPOTRegressor(
-                random_state=42,
-            )
             model.fit(x, y.to_numpy())
             client.close()
+        print("\n✅ TPOT evaluated the following pipelines:\n")
+        for i, (pipeline_str, score_dict) in enumerate(model.evaluated_individuals_.items(), 1):
+            score = score_dict.get('internal_cv_score', 'N/A')
+            if isinstance(score, float):
+                print(f"{i:03d}: CV Score={score:.4f}")
+            else:
+                print(f"{i:03d}: CV Score={score}")
+            print(f"Pipeline: {pipeline_str}\n")
 
         return model
+
+        # cluster = LocalCluster(n_workers=12)
+        # with cluster.get_client() as client:
+        #     model = tpot.TPOTRegressor(
+        #         random_state=42,
+        #     )
+        #     model.fit(x, y.to_numpy())
+        #     client.close()
+        #
+        # return model
 
     def train(
         self,

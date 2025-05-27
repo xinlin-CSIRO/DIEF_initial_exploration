@@ -42,7 +42,18 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 import numpy as np
-
+import sys
+from loguru import logger
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    matthews_corrcoef,
+    confusion_matrix,
+    classification_report
+)
+from imblearn.metrics import geometric_mean_score
 def undersample(X, y, timesteps=None, features=None):
     # print("🟡 Original class distribution:")
     orig_counts = Counter(y)
@@ -119,7 +130,7 @@ class LSTMClassifier(nn.Module):
         hn = hn.squeeze(0)                       # hn: [batch_size, hidden_size]
         output = self.fc(hn)                     # output: [batch_size, num_classes]
         return output
-class PredictionPipeline:
+class Data_Prep_Pipeline:
     def __init__(self, dataset_id: str, output_dir: str) -> None:
         self.dataset_id = dataset_id
         self.project_dir = (pathlib.Path(__file__).parent / ".." / "..").resolve()
@@ -151,392 +162,6 @@ class PredictionPipeline:
         )
         if not self.data_path.exists():
             raise FileNotFoundError(f"Data file not found: {self.daily_data_path}")
-
-    def lstm_run(self, train_X, train_Y, test_X,test_Y):
-        # Scale input
-
-        total_features = train_X.shape[1]
-        # Final NaN check (just in case)
-        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
-        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
-
-        # Reshape to [batch, seq_len=1, features]
-
-        train_X_np = train_X.to_numpy().reshape(-1, 1, total_features)
-        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
-
-
-        # Wrap in PyTorch Dataset & DataLoader
-        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y.to_numpy()))
-        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
-
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        input_size = train_X.shape[1]
-
-        num_classes = 3
-        model = LSTMClassifier(input_size, self.hidden_size, num_classes)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-        model.eval()
-        correct, total = 0, 0
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                total += yb.size(0)
-                correct += (predicted == yb).sum().item()
-        acc = correct / total
-        print(f"Test Accuracy: {acc:.2%}")
-
-        all_preds = []
-        all_labels = []
-
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-        # Individual metrics
-        return(all_labels, all_preds)
-
-    def lstm_run_resampled (self,train_X, train_Y, test_X,test_Y) -> None:
-
-        total_features = train_X.shape[1]
-
-        # Final NaN check (just in case)
-        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
-        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
-
-        train_X, train_Y = undersample(train_X, train_Y, train_X.shape[0], total_features)
-        train_X_np = train_X.reshape(-1, 1, total_features)
-        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
-
-        # Wrap in PyTorch Dataset & DataLoader
-        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y))
-        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
-
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        input_size = total_features
-        num_classes = 3
-        model = LSTMClassifier(input_size, self.hidden_size, num_classes)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-        model.eval()
-        correct, total = 0, 0
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                total += yb.size(0)
-                correct += (predicted == yb).sum().item()
-        acc = correct / total
-        print(f"Test Accuracy: {acc:.2%}")
-
-        all_preds = []
-        all_labels = []
-
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-        return (all_labels, all_preds)
-
-    def lstm_run_classweighted(self,train_X, train_Y, test_X,test_Y):
-        total_features = train_X.shape[1]
-        train_X_np = train_X.to_numpy().reshape(-1, 1, total_features)
-        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
-
-        # Compute class weights
-        # class_weights = compute_class_weight(class_weight='balanced', classes=[0, 1, 2], y=train_Y)
-
-        class_weights = compute_class_weight(class_weight='balanced', classes=np.array([0, 1, 2]), y=train_Y)
-
-        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-
-        # Dataset & DataLoader
-        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y.to_numpy()))
-        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        # Model
-        model = LSTMClassifier(input_size=total_features, hidden_size=self.hidden_size, num_classes=3)
-        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)  # 🔥 class-weighted loss
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-
-        # Training loop
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-
-        # Evaluation
-        model.eval()
-        all_preds, all_labels = [], []
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-        return all_labels, all_preds
-
-    def dnn_run(self,train_X, train_Y, test_X,test_Y):
-
-        # Final NaN check (just in case)
-        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
-        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
-
-        # Wrap in PyTorch Dataset & DataLoader
-        train_ds = TensorDataset(torch.Tensor(train_X.to_numpy()), torch.LongTensor(train_Y.to_numpy()))
-        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
-
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        input_size = train_X.shape[1]  # Number of features
-        num_classes = 3  # Number of classes
-
-        # Instantiate the DNN model
-        model = DNNClassifier(input_size, self.hidden_size, num_classes)
-        criterion = nn.CrossEntropyLoss()  # For classification
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-
-        # Training loop
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-
-        # Evaluation
-        model.eval()
-        correct, total = 0, 0
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                total += yb.size(0)
-                correct += (predicted == yb).sum().item()
-
-        acc = correct / total
-        print(f"Test Accuracy: {acc:.2%}")
-
-        all_preds = []
-        all_labels = []
-
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-
-        return all_labels, all_preds
-
-    def dnn_run_resampled(self,train_X, train_Y, test_X,test_Y) -> None:
-
-        total_features = train_X.shape[1]
-        # Final NaN check (just in case)
-        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
-        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
-
-        train_X, train_Y = undersample(train_X, train_Y, train_X.shape[0], total_features)
-        train_X = train_X.reshape(train_X.shape[0], -1)  # Make sure it's 2D: [samples, features]
-
-        # Wrap in PyTorch Dataset & DataLoader
-        train_ds = TensorDataset(torch.Tensor(train_X), torch.LongTensor(train_Y))
-        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
-
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        input_size = total_features
-        num_classes = 3  # Number of classes
-
-        # Instantiate the DNN model
-        model = DNNClassifier(input_size, self.hidden_size, num_classes)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-
-        # Training loop
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-
-        # Evaluation
-        model.eval()
-        correct, total = 0, 0
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                total += yb.size(0)
-                correct += (predicted == yb).sum().item()
-
-        acc = correct / total
-        print(f"Test Accuracy: {acc:.2%}")
-
-        all_preds = []
-        all_labels = []
-
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-
-        return all_labels, all_preds
-
-    def dnn_run_classweighted(self,train_X, train_Y, test_X,test_Y):
-        # Compute class weights
-        class_weights = compute_class_weight(class_weight='balanced', classes=np.array([0, 1, 2]), y=train_Y)
-        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-
-        # Convert to PyTorch tensors
-        train_ds = TensorDataset(torch.Tensor(train_X.to_numpy()), torch.LongTensor(train_Y.to_numpy()))
-        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
-        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=32)
-
-        input_size = train_X.shape[1]
-        num_classes = 3
-
-        # Define DNN model
-        model = DNNClassifier(input_size=input_size, hidden_size=self.hidden_size, num_classes=num_classes)
-        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)  # 🔥 class-weighted
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
-
-        # Training loop
-        for epoch in range(self.epoches):
-            model.train()
-            for batch_X, batch_y in train_loader:
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
-
-        # Evaluation
-        model.eval()
-        all_preds = []
-        all_labels = []
-        with torch.no_grad():
-            for xb, yb in test_loader:
-                pred = model(xb)
-                _, predicted = torch.max(pred, 1)
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(yb.cpu().numpy())
-        return all_labels, all_preds
-
-    def xgbpost_run(self,train_X, train_Y, test_X,test_Y):
-        model = XGBClassifier(
-            objective='multi:softmax',
-            num_class=3,
-            learning_rate=0.1,
-            max_depth=5,
-            n_estimators=100,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        model.fit(train_X, train_Y)
-
-        # Predictions
-        preds = model.predict(test_X)
-
-        return test_Y.tolist(), preds.tolist()
-    def xgbpost_run_re_weighted(self,train_X, train_Y, test_X,test_Y):
-        # Class weights for imbalance handling
-        class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_Y), y=train_Y)
-        class_weight_dict = {i: weight for i, weight in enumerate(class_weights)}
-
-        # Map weights to each training sample
-        sample_weights = train_Y.map(class_weight_dict)
-
-        # Train XGBoost
-        model = XGBClassifier(
-            objective='multi:softmax',
-            num_class=3,
-            learning_rate=0.05,
-            max_depth=6,
-            n_estimators=100,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        model.fit(train_X, train_Y, sample_weight=sample_weights)
-        # Predictions
-        preds = model.predict(test_X)
-        return test_Y.tolist(), preds.tolist()
-
-    def xgbpost_run_resampled(self,train_X, train_Y, test_X,test_Y):
-        # Model (no class weights)
-        model = XGBClassifier(
-            objective='multi:softmax',
-            num_class=3,
-            learning_rate=0.1,
-            max_depth=5,
-            n_estimators=100,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        model.fit(train_X, train_Y)
-
-        # Predictions
-        preds = model.predict(test_X)
-
-        return test_Y.tolist(), preds.tolist()
-
 
     @staticmethod
     def add_lagged_columns(
@@ -571,7 +196,7 @@ class PredictionPipeline:
             data.with_row_index()
             .with_columns(
                 [
-                    pl.col("Timestamp_unix").diff().alias("diff"),
+                    # pl.col("Timestamp_unix").diff().alias("diff"),
                     pl.col("Timestamp_Local").str.to_datetime(),
                     (pl.col("index") * 900),
                 ]
@@ -579,7 +204,8 @@ class PredictionPipeline:
             .with_columns(
                 pl.from_epoch("index", time_unit="s").alias("ts"),
             )
-            .drop(["index", "Timestamp_unix", "Timestamp_Local", "diff"])
+            # .drop(["index", "Timestamp_unix", "Timestamp_Local", "diff"])
+            .drop(["index", "Timestamp_Local"])
         )
         return self.add_lagged_columns(
             data,
@@ -780,7 +406,430 @@ class PredictionPipeline:
 
             fig = go.Figure(data=frames[0]["data"], frames=frames, layout=layout)
             fig.write_html(self.output_dir / f"{date_index}_shap_waterfall.html")
+def metrics (all_labels: list, all_preds: list):
+    # Compute metrics
+    acc = accuracy_score(all_labels, all_preds)
+    precision_macro = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+    recall_macro = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1_weighted = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+    mcc = matthews_corrcoef(all_labels, all_preds)
+    gmean = geometric_mean_score(all_labels, all_preds, average='macro')
 
+    return [acc, precision_macro, recall_macro, f1_macro, mcc, gmean]
+class Model_training_class:
+    def __init__(self) -> None:
+        self.hidden_size =32
+        self.epoches=10
+        self.lr=0.0001
+
+    def lstm_training (self, train_X, train_Y, trained_on_id):
+        # Scale input
+        total_features = train_X.shape[1]
+        # Final NaN check (just in case)
+        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
+        train_X_np = train_X.to_numpy().reshape(-1, 1, total_features)
+        # Wrap in PyTorch Dataset & DataLoader
+        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y.to_numpy()))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+        input_size = train_X.shape[1]
+        num_classes = 3
+        model = LSTMClassifier(input_size, self.hidden_size, num_classes)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_LSTM.pth")
+    def lstm_testing (self, test_X,test_Y,trained_on_id, test_on_id):
+        # Scale input
+        total_features = test_X.shape[1]
+        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
+        # Reshape to [batch, seq_len=1, features]
+
+        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
+
+        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
+
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        input_size = test_X.shape[1]
+
+        num_classes = 3
+        model = LSTMClassifier(input_size, self.hidden_size, num_classes)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_LSTM.pth"))
+        model.eval()  # Important! Switch model to evaluation mode
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+        # Individual metrics
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean =metrics(all_labels, all_preds)
+        result = (f"Model: LSTM | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+
+        return result
+
+    def lstm_resampled_training(self, train_X, train_Y, trained_on_id):
+        total_features = train_X.shape[1]
+        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
+
+        train_X, train_Y = undersample(train_X, train_Y, train_X.shape[0], total_features)
+        train_X_np = train_X.reshape(-1, 1, total_features)
+
+        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+        model = LSTMClassifier(input_size=total_features, hidden_size=self.hidden_size, num_classes=3)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_resampled_LSTM.pth")
+
+    def lstm_resampled_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        total_features = test_X.shape[1]
+        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
+
+        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
+        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        model = LSTMClassifier(input_size=total_features, hidden_size=self.hidden_size, num_classes=3)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_resampled_LSTM.pth"))
+        model.eval()
+
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(all_labels, all_preds)
+
+        result = (f"Model: LSTM-Resampled | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+
+        return result
+
+    def lstm_classweighted_training(self, train_X, train_Y, trained_on_id):
+        total_features = train_X.shape[1]
+        train_X_np = train_X.to_numpy().reshape(-1, 1, total_features)
+        class_weights = compute_class_weight(class_weight='balanced', classes=np.array([0, 1, 2]), y=train_Y)
+        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+
+        train_ds = TensorDataset(torch.Tensor(train_X_np), torch.LongTensor(train_Y.to_numpy()))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+        model = LSTMClassifier(input_size=total_features, hidden_size=self.hidden_size, num_classes=3)
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_classweighted_LSTM.pth")
+
+    def lstm_classweighted_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        total_features = test_X.shape[1]
+        test_X_np = test_X.to_numpy().reshape(-1, 1, total_features)
+
+        test_ds = TensorDataset(torch.Tensor(test_X_np), torch.LongTensor(test_Y.to_numpy()))
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        model = LSTMClassifier(input_size=total_features, hidden_size=self.hidden_size, num_classes=3)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_classweighted_LSTM.pth"))
+        model.eval()
+
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(all_labels, all_preds)
+        result = (f"Model: LSTM-Classweighted | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def dnn_training(self, train_X, train_Y, trained_on_id):
+        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
+        train_ds = TensorDataset(torch.Tensor(train_X.to_numpy()), torch.LongTensor(train_Y.to_numpy()))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+        input_size = train_X.shape[1]
+        num_classes = 3
+        model = DNNClassifier(input_size, self.hidden_size, num_classes)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_DNN.pth")
+
+    def dnn_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
+        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        input_size = test_X.shape[1]
+        num_classes = 3
+        model = DNNClassifier(input_size, self.hidden_size, num_classes)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_DNN.pth"))
+        model.eval()
+
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(all_labels, all_preds)
+        result = (f"Model: DNN | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def xgbpost_training(self, train_X, train_Y, trained_on_id):
+        model = XGBClassifier(
+            objective='multi:softmax',
+            num_class=3,
+            learning_rate=0.1,
+            max_depth=5,
+            n_estimators=100,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1
+        )
+        model.fit(train_X, train_Y)
+        model.save_model(f"trained_on_{trained_on_id}_XGB.model")
+
+    def xgbpost_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        model = XGBClassifier()
+        model.load_model(f"trained_on_{trained_on_id}_XGB.model")
+        preds = model.predict(test_X)
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(test_Y.tolist(), preds.tolist())
+        result = (f"Model: XGB | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def dnn_resampled_training(self, train_X, train_Y, trained_on_id):
+        total_features = train_X.shape[1]
+        assert not train_X.isnull().any().any(), "NaNs in train_X after scaling"
+
+        train_X, train_Y = undersample(train_X, train_Y, train_X.shape[0], total_features)
+        train_X = train_X.reshape(train_X.shape[0], -1)
+
+        train_ds = TensorDataset(torch.Tensor(train_X), torch.LongTensor(train_Y))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+        input_size = total_features
+        num_classes = 3
+        model = DNNClassifier(input_size, self.hidden_size, num_classes)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_resampled_DNN.pth")
+
+    def dnn_resampled_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        assert not test_X.isnull().any().any(), "NaNs in test_X after scaling"
+        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        input_size = test_X.shape[1]
+        num_classes = 3
+        model = DNNClassifier(input_size, self.hidden_size, num_classes)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_resampled_DNN.pth"))
+        model.eval()
+
+        all_preds, all_labels = [], []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(all_labels, all_preds)
+        result = (f"Model: DNN-Resampled | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def dnn_classweighted_training(self, train_X, train_Y, trained_on_id):
+        input_size = train_X.shape[1]
+        class_weights = compute_class_weight(class_weight='balanced', classes=np.array([0, 1, 2]), y=train_Y)
+        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+
+        train_ds = TensorDataset(torch.Tensor(train_X.to_numpy()), torch.LongTensor(train_Y.to_numpy()))
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+        model = DNNClassifier(input_size, self.hidden_size, num_classes=3)
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+
+        for epoch in range(self.epoches):
+            model.train()
+            for batch_X, batch_y in train_loader:
+                outputs = model(batch_X)
+                loss = criterion(outputs, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+        model.eval()
+        torch.save(model.state_dict(), f"trained_on_{trained_on_id}_classweighted_DNN.pth")
+
+    def dnn_classweighted_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        input_size = test_X.shape[1]
+        test_ds = TensorDataset(torch.Tensor(test_X.to_numpy()), torch.LongTensor(test_Y.to_numpy()))
+        test_loader = DataLoader(test_ds, batch_size=32)
+
+        model = DNNClassifier(input_size, self.hidden_size, num_classes=3)
+        model.load_state_dict(torch.load(f"trained_on_{trained_on_id}_classweighted_DNN.pth"))
+        model.eval()
+
+        all_preds, all_labels = [], []
+
+        with torch.no_grad():
+            for xb, yb in test_loader:
+                pred = model(xb)
+                _, predicted = torch.max(pred, 1)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(yb.cpu().numpy())
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(all_labels, all_preds)
+        result = (f"Model: DNN-Classweighted | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def xgbpost_reweighted_training(self, train_X, train_Y, trained_on_id):
+        class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_Y), y=train_Y)
+        class_weight_dict = {i: weight for i, weight in enumerate(class_weights)}
+        sample_weights = train_Y.map(class_weight_dict)
+
+        model = XGBClassifier(
+            objective='multi:softmax',
+            num_class=3,
+            learning_rate=0.05,
+            max_depth=6,
+            n_estimators=100,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1
+        )
+
+        model.fit(train_X, train_Y, sample_weight=sample_weights)
+        model.save_model(f"trained_on_{trained_on_id}_reweighted_XGB.model")
+
+    def xgbpost_reweighted_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        model = XGBClassifier()
+        model.load_model(f"trained_on_{trained_on_id}_reweighted_XGB.model")
+        preds = model.predict(test_X)
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(test_Y.tolist(), preds.tolist())
+        result = (f"Model: XGB-Reweighted | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
+
+    def xgbpost_resampled_training(self, train_X, train_Y, trained_on_id):
+        model = XGBClassifier(
+            objective='multi:softmax',
+            num_class=3,
+            learning_rate=0.1,
+            max_depth=5,
+            n_estimators=100,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1
+        )
+
+        model.fit(train_X, train_Y)
+        model.save_model(f"trained_on_{trained_on_id}_resampled_XGB.model")
+
+    def xgbpost_resampled_testing(self, test_X, test_Y, trained_on_id, test_on_id):
+        model = XGBClassifier()
+        model.load_model(f"trained_on_{trained_on_id}_resampled_XGB.model")
+        preds = model.predict(test_X)
+
+        acc, precision_macro, recall_macro, f1_macro, mcc, gmean = metrics(test_Y.tolist(), preds.tolist())
+        result = (f"Model: XGB-Resampled | Trained on: {trained_on_id} | Tested on: {test_on_id} | "
+                  f"Acc: {acc:.4f}, Precision: {precision_macro:.4f}, Recall: {recall_macro:.4f}, "
+                  f"F1: {f1_macro:.4f}, MCC: {mcc:.4f}, G-Mean: {gmean:.4f}")
+        return result
 
 def parse_arguments(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train and test a model")
@@ -791,51 +840,6 @@ def parse_arguments(args: list[str]) -> argparse.Namespace:
         "--output_dir", type=str, default=None, help="The output directory"
     )
     return parser.parse_args(args)
-
-
-import sys
-from loguru import logger
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    matthews_corrcoef,
-    confusion_matrix,
-    classification_report
-)
-from imblearn.metrics import geometric_mean_score
-
-def visualized_aligned(
-    all_labels: list,
-    all_preds: list,
-    model_name: str,
-    logger,
-    dataset_id: str
-):
-    # Compute metrics
-    acc = accuracy_score(all_labels, all_preds)
-    precision_macro = precision_score(all_labels, all_preds, average='macro', zero_division=0)
-    recall_macro = recall_score(all_labels, all_preds, average='macro', zero_division=0)
-    f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
-    f1_weighted = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
-    mcc = matthews_corrcoef(all_labels, all_preds)
-    gmean = geometric_mean_score(all_labels, all_preds, average='macro')
-
-    # Print results
-    logger.info(f"{dataset_id}'s {model_name} Results:")
-    logger.info(f"Accuracy: {acc:.4f}")
-    logger.info(f"F1 (weighted): {f1_weighted:.4f}")
-    logger.info(f"F1 (macro): {f1_macro:.4f}")
-    logger.info(f"Precision (macro): {precision_macro:.4f}")
-    logger.info(f"Recall (macro): {recall_macro:.4f}")
-    logger.info(f"MCC: {mcc:.4f}")
-    logger.info(f"G-Mean: {gmean:.4f}")
-    logger.info(f"Confusion matrix:\n{confusion_matrix(all_labels, all_preds)}\n")
-    logger.info(f"Classification report:\n{classification_report(all_labels, all_preds)}")
-    return [acc, precision_macro, recall_macro, f1_macro, mcc, gmean]
-
-
 
 def plot_radar(results: dict, save_path="radar_plot.png"):
     labels = ["Accuracy", "Precision", "Recall", "F1", "MCC", "G-Mean"]
@@ -860,48 +864,186 @@ def plot_radar(results: dict, save_path="radar_plot.png"):
     ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
     plt.tight_layout()
     plt.savefig(save_path)
-    plt.close()
+    plt.show()
 
-def main(args: list[str] = sys.argv) -> None:
+def data_prep(args: list[str] = sys.argv):
     cfg = parse_arguments(args)
-    pipeline = PredictionPipeline(cfg.dataset_id, cfg.output_dir)
-    results = {}
+    pipeline = Data_Prep_Pipeline(cfg.dataset_id, cfg.output_dir)
     data = pipeline.get_data()
     train_X, train_Y, test_X, test_Y = pipeline.get_train_test_split(data)
+    return (train_X, train_Y, test_X, test_Y, cfg.dataset_id)
 
-    all_labels, all_preds =pipeline.lstm_run( train_X, train_Y, test_X, test_Y)
-    results["LSTM"]=visualized_aligned (all_labels =all_labels, all_preds =all_preds, logger =pipeline.logger, model_name ="LSTM", dataset_id =cfg.dataset_id)
+def trainer (train_X, train_Y, dataset_id) -> None:
+    pipeline = Model_training_class ()
 
-    all_labels, all_preds= pipeline.lstm_run_resampled( train_X, train_Y, test_X,test_Y) #lstm_run_classweighted
-    results["LSTM-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-US",  dataset_id=cfg.dataset_id)
+    pipeline.lstm_training(train_X, train_Y, dataset_id)
 
-    all_labels, all_preds = pipeline.lstm_run_classweighted( train_X, train_Y, test_X,test_Y)  # lstm_run_classweighted
-    results["LSTM-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-CW", dataset_id=cfg.dataset_id)
+    pipeline.lstm_resampled_training(train_X, train_Y, dataset_id)
 
-    all_labels, all_preds = pipeline.dnn_run( train_X, train_Y, test_X,test_Y)
-    results["DNN"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN",dataset_id=cfg.dataset_id)
-    all_labels, all_preds = pipeline.dnn_run_resampled( train_X, train_Y, test_X,test_Y) #dnn_run_classweighted
-    results["DNN-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-US",
-                       dataset_id=cfg.dataset_id)
-    all_labels, all_preds = pipeline.dnn_run_classweighted(  train_X, train_Y, test_X,test_Y)
-    results["DNN-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-CW",
-                       dataset_id=cfg.dataset_id)
+    pipeline.lstm_classweighted_training(train_X, train_Y, dataset_id)
 
-    all_labels, all_preds = pipeline.xgbpost_run( train_X, train_Y, test_X,test_Y)
-    results["Xgboost"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost",
-                       dataset_id=cfg.dataset_id)
-    all_labels, all_preds = pipeline.xgbpost_run_resampled( train_X, train_Y, test_X,test_Y)
-    results["Xgboost-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-US",
-                       dataset_id=cfg.dataset_id)
-    all_labels, all_preds = pipeline.xgbpost_run_re_weighted( train_X, train_Y, test_X,test_Y)
-    results["Xgboost-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-CW",
-                       dataset_id=cfg.dataset_id)
+    pipeline.dnn_training(train_X, train_Y, dataset_id)
 
-    plot_radar(results, save_path=pipeline.output_dir / f"{cfg.dataset_id}_model_comparison_radar.png")
+    pipeline.dnn_resampled_training(train_X, train_Y, dataset_id)
+
+    pipeline.dnn_classweighted_training(train_X, train_Y, dataset_id)
+
+    pipeline.xgbpost_training(train_X, train_Y, dataset_id)
+
+    pipeline.xgbpost_reweighted_training(train_X, train_Y, dataset_id)
+
+    pipeline.xgbpost_resampled_training(train_X, train_Y, dataset_id)
+def tester(test_X, test_Y, trained_on_id, test_on_id) -> list:
+    pipeline = Model_training_class()
+    results = []
+    results.append(pipeline.lstm_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.lstm_resampled_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.lstm_classweighted_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.dnn_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.dnn_resampled_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.dnn_classweighted_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.xgbpost_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.xgbpost_reweighted_testing(test_X, test_Y, trained_on_id, test_on_id))
+    results.append(pipeline.xgbpost_resampled_testing(test_X, test_Y, trained_on_id, test_on_id))
+
+    return results
+
+# def main(args: list[str] = sys.argv) -> None:
+#     cfg = parse_arguments(args)
+#     pipeline = PredictionPipeline(cfg.dataset_id, cfg.output_dir)
+#     results = {}
+#     data = pipeline.get_data()
+#     train_X, train_Y, test_X, test_Y = pipeline.get_train_test_split(data)
+#     pipeline.lstm_training( train_X, train_Y,  cfg.dataset_id)
+#     all_labels, all_preds = pipeline.lstm_testing(test_X, test_Y, cfg.dataset_id)
+#     results["LSTM"]=visualized_aligned (all_labels =all_labels, all_preds =all_preds, logger =pipeline.logger, model_name ="LSTM", dataset_id =cfg.dataset_id)
+#
+#     pipeline.lstm_resampled_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.lstm_resampled_testing(test_X, test_Y, cfg.dataset_id)
+#     results["LSTM-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-US", dataset_id=cfg.dataset_id)
+#
+#     pipeline.lstm_classweighted_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.lstm_classweighted_testing(test_X, test_Y, cfg.dataset_id)
+#     results["LSTM-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-CW", dataset_id=cfg.dataset_id)
+#     # Normal DNN
+#     pipeline.dnn_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.dnn_testing(test_X, test_Y, cfg.dataset_id)
+#     results["DNN"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN", dataset_id=cfg.dataset_id)
+#     # Resampled DNN
+#     pipeline.dnn_resampled_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.dnn_resampled_testing(test_X, test_Y, cfg.dataset_id)
+#     results["DNN-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-US", dataset_id=cfg.dataset_id)
+#     # Classweighted DNN
+#     pipeline.dnn_classweighted_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.dnn_classweighted_testing(test_X, test_Y, cfg.dataset_id)
+#     results["DNN-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-CW", dataset_id=cfg.dataset_id)
+#
+#     # Normal XGB
+#     pipeline.xgbpost_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.xgbpost_testing(test_X, test_Y, cfg.dataset_id)
+#     results["Xgboost"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger,  model_name="Xgboost", dataset_id=cfg.dataset_id)
+#     # Re-weighted XGB
+#     pipeline.xgbpost_reweighted_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.xgbpost_reweighted_testing(test_X, test_Y, cfg.dataset_id)
+#     results["Xgboost-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-US", dataset_id=cfg.dataset_id)
+#
+#     # Resampled XGB
+#     pipeline.xgbpost_resampled_training(train_X, train_Y, cfg.dataset_id)
+#     all_labels, all_preds = pipeline.xgbpost_resampled_testing(test_X, test_Y, cfg.dataset_id)
+#     results["Xgboost-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger,
+#                                                model_name="Xgboost-CW", dataset_id=cfg.dataset_id)
+#
+#     # all_labels, all_preds= pipeline.lstm_run_resampled( train_X, train_Y, test_X,test_Y) #lstm_run_classweighted
+#     # results["LSTM-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-US",  dataset_id=cfg.dataset_id)
+#     # #
+#     # all_labels, all_preds = pipeline.lstm_run_classweighted( train_X, train_Y, test_X,test_Y)  # lstm_run_classweighted
+#     # results["LSTM-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-CW", dataset_id=cfg.dataset_id)
+#     #
+#     # all_labels, all_preds = pipeline.dnn_run( train_X, train_Y, test_X,test_Y)
+#     # results["DNN"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN",dataset_id=cfg.dataset_id)
+#     # all_labels, all_preds = pipeline.dnn_run_resampled( train_X, train_Y, test_X,test_Y) #dnn_run_classweighted
+#     # results["DNN-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-US",
+#     #                    dataset_id=cfg.dataset_id)
+#     # all_labels, all_preds = pipeline.dnn_run_classweighted(  train_X, train_Y, test_X,test_Y)
+#     # results["DNN-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-CW",
+#     #                    dataset_id=cfg.dataset_id)
+#     #
+#     # all_labels, all_preds = pipeline.xgbpost_run( train_X, train_Y, test_X,test_Y)
+#     # results["Xgboost"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost",
+#     #                    dataset_id=cfg.dataset_id)
+#     # all_labels, all_preds = pipeline.xgbpost_run_resampled( train_X, train_Y, test_X,test_Y)
+#     # results["Xgboost-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-US",
+#     #                    dataset_id=cfg.dataset_id)
+#     # all_labels, all_preds = pipeline.xgbpost_run_re_weighted( train_X, train_Y, test_X,test_Y)
+#     # results["Xgboost-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-CW",
+#     #                    dataset_id=cfg.dataset_id)
+#     #
+#     plot_radar(results, save_path=pipeline.output_dir / f"{cfg.dataset_id}_model_comparison_radar.png")
 
 if __name__ == "__main__":
+    datasets = {}
+
     data_dir = pathlib.Path(__file__).parent / ".." / ".." / "data"
-    for file in tqdm(
-        [x for x in data_dir.glob("*") if x.is_dir()], desc="Processing datasets"
-    ):
-        main(["--dataset_id", file.name, "--output_dir", f"output/lagged/{file.name}"])
+
+    for file in tqdm([x for x in data_dir.glob("*") if x.is_dir()], desc="Loading datasets"):
+        train_X, train_Y, test_X, test_Y, dataset_id = data_prep(
+            ["--dataset_id", file.name, "--output_dir", f"output/lagged/{file.name}"])
+        datasets[dataset_id] = {
+            "train_X": train_X,
+            "train_Y": train_Y,
+            "test_X": test_X,
+            "test_Y": test_Y,
+        }
+    print(f"Number of datasets loaded: {len(datasets)}")
+    for dataset_id, data in datasets.items():
+        print(f"\nTraining models for dataset: {dataset_id}")
+        trainer (data["train_X"], data["train_Y"], dataset_id)
+    # ====== Testing Phase ======
+    print("\n==== Testing Models ====")
+    all_results = []
+
+    dataset_ids = list(datasets.keys())
+
+    for trained_on_id in dataset_ids:
+        for test_on_id in dataset_ids:
+            print(f"\nTesting models: Trained on {trained_on_id} | Tested on {test_on_id}")
+            results = tester(
+                datasets[test_on_id]["test_X"],
+                datasets[test_on_id]["test_Y"],
+                trained_on_id,
+                test_on_id
+            )
+            all_results.extend(results)
+
+    # ====== Print Final Results ======
+    print("\n==== Final Testing Results ====")
+    for res in all_results:
+        print(res)
+
+    df_results = pd.DataFrame([{
+        "Model": r.split("|")[0].split(":")[1].strip(),
+        "Trained_on": r.split("|")[1].split(":")[1].strip(),
+        "Tested_on": r.split("|")[2].split(":")[1].strip(),
+        "Acc": float(r.split("|")[3].split(",")[0].split(":")[1]),
+        "Precision": float(r.split("Precision:")[1].split(",")[0]),
+        "Recall": float(r.split("Recall:")[1].split(",")[0]),
+        "F1": float(r.split("F1:")[1].split(",")[0]),
+        "MCC": float(r.split("MCC:")[1].split(",")[0]),
+        "G-Mean": float(r.split("G-Mean:")[1]),
+    } for r in all_results])
+
+    output_path = pathlib.Path(__file__).parent / "final_results.xlsx"
+    with pd.ExcelWriter(output_path) as writer:
+        for trained_on in dataset_ids:
+            for tested_on in dataset_ids:
+                table = df_results[
+                    (df_results["Trained_on"] == trained_on) & (df_results["Tested_on"] == tested_on)
+                    ]
+                sheet_name = f"{trained_on[:6]}_to_{tested_on[:6]}"  # Limit sheet name to 31 chars if needed
+                table.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    print(f"\nSaved all results to: {output_path}")
+
+
+
+
