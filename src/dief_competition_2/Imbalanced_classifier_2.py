@@ -12,6 +12,8 @@ import tpot
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+import os
+from sklearn.preprocessing import LabelEncoder
 from loguru import logger
 from dief_competition_2.baseline_regressor import BaselineRegressor
 from dief_competition_2.demand_response_flag_classifier import (
@@ -884,7 +886,6 @@ def parse_arguments(args: list[str]) -> argparse.Namespace:
     )
     return parser.parse_args(args)
 
-
 def plot_radar(results: dict, save_path="radar_plot.png"):
     labels = ["Accuracy", "Precision", "Recall", "F1", "MCC", "G-Mean"]
     num_vars = len(labels)
@@ -964,148 +965,103 @@ def tester(test_X, test_Y, trained_on_id, test_on_id) -> list:
 
     return results
 
-# def main(args: list[str] = sys.argv) -> None:
-#     cfg = parse_arguments(args)
-#     pipeline = PredictionPipeline(cfg.dataset_id, cfg.output_dir)
-#     results = {}
-#     data = pipeline.get_data()
-#     train_X, train_Y, test_X, test_Y = pipeline.get_train_test_split(data)
-#     pipeline.lstm_training( train_X, train_Y,  cfg.dataset_id)
-#     all_labels, all_preds = pipeline.lstm_testing(test_X, test_Y, cfg.dataset_id)
-#     results["LSTM"]=visualized_aligned (all_labels =all_labels, all_preds =all_preds, logger =pipeline.logger, model_name ="LSTM", dataset_id =cfg.dataset_id)
-#
-#     pipeline.lstm_resampled_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.lstm_resampled_testing(test_X, test_Y, cfg.dataset_id)
-#     results["LSTM-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-US", dataset_id=cfg.dataset_id)
-#
-#     pipeline.lstm_classweighted_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.lstm_classweighted_testing(test_X, test_Y, cfg.dataset_id)
-#     results["LSTM-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-CW", dataset_id=cfg.dataset_id)
-#     # Normal DNN
-#     pipeline.dnn_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.dnn_testing(test_X, test_Y, cfg.dataset_id)
-#     results["DNN"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN", dataset_id=cfg.dataset_id)
-#     # Resampled DNN
-#     pipeline.dnn_resampled_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.dnn_resampled_testing(test_X, test_Y, cfg.dataset_id)
-#     results["DNN-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-US", dataset_id=cfg.dataset_id)
-#     # Classweighted DNN
-#     pipeline.dnn_classweighted_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.dnn_classweighted_testing(test_X, test_Y, cfg.dataset_id)
-#     results["DNN-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-CW", dataset_id=cfg.dataset_id)
-#
-#     # Normal XGB
-#     pipeline.xgbpost_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.xgbpost_testing(test_X, test_Y, cfg.dataset_id)
-#     results["Xgboost"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger,  model_name="Xgboost", dataset_id=cfg.dataset_id)
-#     # Re-weighted XGB
-#     pipeline.xgbpost_reweighted_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.xgbpost_reweighted_testing(test_X, test_Y, cfg.dataset_id)
-#     results["Xgboost-US"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-US", dataset_id=cfg.dataset_id)
-#
-#     # Resampled XGB
-#     pipeline.xgbpost_resampled_training(train_X, train_Y, cfg.dataset_id)
-#     all_labels, all_preds = pipeline.xgbpost_resampled_testing(test_X, test_Y, cfg.dataset_id)
-#     results["Xgboost-CW"] = visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger,
-#                                                model_name="Xgboost-CW", dataset_id=cfg.dataset_id)
-#
-#     # all_labels, all_preds= pipeline.lstm_run_resampled( train_X, train_Y, test_X,test_Y) #lstm_run_classweighted
-#     # results["LSTM-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-US",  dataset_id=cfg.dataset_id)
-#     # #
-#     # all_labels, all_preds = pipeline.lstm_run_classweighted( train_X, train_Y, test_X,test_Y)  # lstm_run_classweighted
-#     # results["LSTM-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="LSTM-CW", dataset_id=cfg.dataset_id)
-#     #
-#     # all_labels, all_preds = pipeline.dnn_run( train_X, train_Y, test_X,test_Y)
-#     # results["DNN"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN",dataset_id=cfg.dataset_id)
-#     # all_labels, all_preds = pipeline.dnn_run_resampled( train_X, train_Y, test_X,test_Y) #dnn_run_classweighted
-#     # results["DNN-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-US",
-#     #                    dataset_id=cfg.dataset_id)
-#     # all_labels, all_preds = pipeline.dnn_run_classweighted(  train_X, train_Y, test_X,test_Y)
-#     # results["DNN-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="DNN-CW",
-#     #                    dataset_id=cfg.dataset_id)
-#     #
-#     # all_labels, all_preds = pipeline.xgbpost_run( train_X, train_Y, test_X,test_Y)
-#     # results["Xgboost"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost",
-#     #                    dataset_id=cfg.dataset_id)
-#     # all_labels, all_preds = pipeline.xgbpost_run_resampled( train_X, train_Y, test_X,test_Y)
-#     # results["Xgboost-US"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-US",
-#     #                    dataset_id=cfg.dataset_id)
-#     # all_labels, all_preds = pipeline.xgbpost_run_re_weighted( train_X, train_Y, test_X,test_Y)
-#     # results["Xgboost-CW"]=visualized_aligned(all_labels=all_labels, all_preds=all_preds, logger=pipeline.logger, model_name="Xgboost-CW",
-#     #                    dataset_id=cfg.dataset_id)
-#     #
-#     plot_radar(results, save_path=pipeline.output_dir / f"{cfg.dataset_id}_model_comparison_radar.png")
 
 if __name__ == "__main__":
     datasets = {}
+    base_dir = pathlib.Path(__file__).parent / ".." / ".." / "data"
+    for folder_name in os.listdir(base_dir):
+        folder_path = os.path.join(base_dir, folder_name)
 
-    # data_dir = pathlib.Path(__file__).parent / ".." / ".." / "data"
-    # for file in tqdm([x for x in data_dir.glob("*") if x.is_dir()], desc="Loading datasets"):
-    #     train_X, train_Y, test_X, test_Y, dataset_id = data_prep(
-    #         ["--dataset_id", file.name, "--output_dir", f"output/lagged/{file.name}"])
-    #     datasets[dataset_id] = {
-    #         "train_X": train_X,
-    #         "train_Y": train_Y,
-    #         "test_X": test_X,
-    #         "test_Y": test_Y,
-    #     }
-    # print(f"Number of datasets loaded: {len(datasets)}")
+        if os.path.isdir(folder_path):
+            train_df = None
+            test_df = None
+            train_file_name = None
+            test_file_name = None
 
-    datasets = {}
-    data_dir = pathlib.Path(__file__).parent / ".." / ".." / "data"
-    data_dir_test = pathlib.Path("C:/Users/wan397/OneDrive - CSIRO/Desktop/DIEF/dief-competition-2/test/Mel")
+            for file_name in os.listdir(folder_path):
+                if file_name.endswith('.csv'):
+                    file_path = os.path.join(folder_path, file_name)
 
-    id=''
-    for file in tqdm([x for x in data_dir.glob("*") if x.is_dir()], desc="Loading training datasets"):
-        train_X, train_Y, test_X, test_Y, dataset_id = data_prep_specific_training(
-            ["--dataset_id", file.name, "--output_dir", f"output/lagged/{file.name}"])
-        datasets[dataset_id] = {
-            "train_X": train_X,
-            "train_Y": train_Y,
-            "test_X": None,
-            "test_Y": None,
-        }
-        id=dataset_id
-    all_test_data = {}
-    # test_dataset_id = "Melbourne_07_Y1"
-    for file in data_dir_test.glob("*_subhourly.csv"):
-        # Strip "_Dataset_subhourly" to get dataset_id
-        test_dataset_id = file.name.replace("_Dataset_subhourly.csv", "")
+                    if "Train" in file_name:
+                        train_df = pd.read_csv(file_path)
+                        train_file_name = file_name
+                    elif "Test" in file_name:
+                        test_df = pd.read_csv(file_path)
+                        test_file_name = file_name
 
-        _, _, test_X, test_Y, _ = data_prep_specific_testing([
-            "--dataset_id", test_dataset_id,
-            "--output_dir", f"output/lagged/{test_dataset_id}",
-            "--data_path", str(file)
-        ])
+            if train_df is not None or test_df is not None:
+                datasets[folder_name] = {
+                    'train': train_df,
+                    'test': test_df,
+                    'train_on_id': train_file_name,
+                    'test_on_id': test_file_name
+                }
 
-        datasets[id].update({
-            "test_X": test_X,
-            "test_Y": test_Y,
-        })
-        print(f"🔄 Merged test data into: {test_dataset_id}")
+    # Display keys of the loaded data to confirm successful parsing
+    list(datasets.keys())
 
+    print("\n==== Testing Models ====")
+    training_feature=['Dry_Bulb_Temperature_C','Global_Horizontal_Radiation_W/m2','Building_Power_kW','Demand_Response_Capacity_kW']
+    test_feature=['Demand_Response_Flag']
+    for dataset_name, dataset_info in datasets.items():
+        print(f"Dataset: {dataset_name}")
 
-    print(f"Number of datasets loaded: {len(datasets)}")
+        train_df = dataset_info['train']
+        # test_df = dataset_info['test']
+        train_file = dataset_info['train_on_id']
+        test_file = dataset_info['test_on_id']
+        train_X = train_df[training_feature]
+        train_Y = train_df[test_feature[0]]
+        # You can process train_df and test_df as needed here
+        print(f"\nTraining models for dataset: {dataset_name}")
 
-    for dataset_id, data in datasets.items():
-        print(f"\nTraining models for dataset: {dataset_id}")
-        trainer (data["train_X"], data["train_Y"], dataset_id)
-    # ====== Testing Phase ======
+        combined = pd.concat([train_X, train_Y], axis=1).dropna()
+        train_X = combined[train_X.columns]
+        train_Y = combined[train_Y.name]
+
+        # 2. Encode target labels if necessary
+        if train_Y.dtype != int or train_Y.min() < 0:
+            le = LabelEncoder()
+            train_Y = pd.Series(le.fit_transform(train_Y), name=train_Y.name)
+
+        # 3. Ensure integer type
+        train_Y = train_Y.astype(int)
+
+        # 4. Call trainer
+        trainer(train_X, train_Y, dataset_name)
+
     print("\n==== Testing Models ====")
     all_results = []
+    for dataset_name, dataset_info in datasets.items():
+        print(f"Dataset: {dataset_name}")
 
-    dataset_ids = list(datasets.keys())
+        # train_df = dataset_info['train']
+        test_df = dataset_info['test']
+        train_file = dataset_info['train_on_id']
+        test_file = dataset_info['test_on_id']
+        test_X = test_df[training_feature]
+        test_Y = test_df[test_feature[0]]
+        print(f"  Train file: {train_file}, shape: {train_df.shape}")
+        print(f"  Test file: {test_file}, shape: {test_df.shape}")
 
-    for trained_on_id in dataset_ids:
-        for test_on_id in dataset_ids:
-            print(f"\nTesting models: Trained on {trained_on_id} | Tested on {test_on_id}")
-            results = tester(
-                datasets[test_on_id]["test_X"],
-                datasets[test_on_id]["test_Y"],
-                trained_on_id,
-                test_on_id
-            )
-            all_results.extend(results)
+
+        combined = pd.concat([test_X, test_Y], axis=1).dropna()
+        test_X = combined[test_X.columns]
+        test_Y = combined[test_Y.name]
+        # 2. Encode target labels if necessary
+        if test_Y.dtype != int or test_Y.min() < 0:
+            le = LabelEncoder()
+            test_Y = pd.Series(le.fit_transform(test_Y), name=test_Y.name)
+        # 3. Ensure integer type
+        test_Y = test_Y.astype(int)
+
+        results = tester(
+            test_X,
+            test_Y,
+            dataset_name,  # filename of the training file
+            test_file  # filename of the test file
+        )
+        all_results.extend(results)
 
     # ====== Print Final Results ======
     print("\n==== Final Testing Results ====")
@@ -1124,17 +1080,6 @@ if __name__ == "__main__":
         "G-Mean": float(r.split("G-Mean:")[1]),
     } for r in all_results])
 
-    output_path = pathlib.Path(__file__).parent / "final_results.xlsx"
-    with pd.ExcelWriter(output_path) as writer:
-        for trained_on in dataset_ids:
-            for tested_on in dataset_ids:
-                table = df_results[
-                    (df_results["Trained_on"] == trained_on) & (df_results["Tested_on"] == tested_on)
-                    ]
-                sheet_name = f"{trained_on[:6]}_to_{tested_on[:6]}"  # Limit sheet name to 31 chars if needed
-                table.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    print(f"\nSaved all results to: {output_path}")
 
 
 

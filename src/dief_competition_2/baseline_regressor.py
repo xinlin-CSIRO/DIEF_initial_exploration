@@ -61,11 +61,12 @@ class BaselineRegressor:
 
         # ✅ Print all pipelines TPOT tried
         print("\n✅ TPOT evaluated the following pipelines:\n")
-        for i, (pipeline_str, score) in enumerate(model.evaluated_individuals_.items(), 1):
+        for i, (pipeline_str, score_dict) in enumerate(model.evaluated_individuals_.items(), 1):
+            score = score_dict['internal_cv_score']
             print(f"{i:03d}: Score={score:.4f}")
             print(f"Pipeline: {pipeline_str}\n")
-
         return model.fitted_pipeline_
+
 
     def hyperparameter_train(self, data: pl.DataFrame) -> tpot.TPOTRegressor:
         x, y = self.split_data(data)
@@ -136,7 +137,16 @@ class BaselineRegressor:
         Test the model
         """
         x, y = self.split_data(data, filter_dr_events=False)
-        predictions = model.predict(x.drop(self.omit_columns))
+        # predictions = model.predict(x.drop(self.omit_columns))
+        columns_to_drop = [col for col in self.omit_columns if col in x.columns]
+        if "dataset_id" in x.columns:
+            columns_to_drop.append("dataset_id")
+
+        x = x.drop(columns_to_drop)
+
+        predictions = model.predict(x)
+
+
         return pl.DataFrame(x).with_columns(
             [
                 pl.Series("Predictions", predictions),
@@ -148,7 +158,7 @@ class BaselineRegressor:
     def visualise_regressions(
         data: pl.DataFrame,
         output_dir: pathlib.Path,
-        dataset_id: str,
+        # dataset_id: str,
         logger: loguru._logger.Logger,
     ) -> None:
         """
@@ -159,7 +169,7 @@ class BaselineRegressor:
         predictions = data["Predictions"]
 
         # Visualise the predictions
-        logger.info(f"{dataset_id} Results:")
+        # logger.info(f"{dataset_id} Results:")
         logger.info(
             f"Mean squared error: {sklearn.metrics.mean_squared_error(y_test, predictions)}"
         )
@@ -186,7 +196,7 @@ class BaselineRegressor:
             results_data,
             x="Predictions",
             y=y_test,
-            title=f"Predictions vs Actual ({dataset_id})",
+            # title=f"Predictions vs Actual ({dataset_id})",
             trendline="ols",
             opacity=0.5,
             range_x=[min, max],
@@ -199,7 +209,7 @@ class BaselineRegressor:
             data.sort("ts"),
             x="ts",
             y=["Building_Power_kW", "Predictions"],
-            title=f"Baseline Prediction ({dataset_id})",
+            # title=f"Baseline Prediction ({dataset_id})",
             labels={"value": "Power kW", "ts": "Timestamp"},
         )
         fig.update_layout(hovermode="x")
